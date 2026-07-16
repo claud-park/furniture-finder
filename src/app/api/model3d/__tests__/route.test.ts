@@ -76,6 +76,19 @@ describe("POST /api/model3d", () => {
     expect((await res.json()).error).toBe("이미지가 너무 커요");
   });
 
+  it("returns 413 when the streamed body exceeds the cap (no content-length check possible)", async () => {
+    configure();
+    const oversized = `{"imageDataUrl":"data:image/jpeg;base64,${"A".repeat(13_000_000)}"}`;
+    const req = new NextRequest("http://localhost/api/model3d", {
+      method: "POST",
+      headers: { "x-forwarded-for": "203.0.113.77" },
+      body: oversized,
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(413);
+    expect((await res.json()).error).toBe("이미지가 너무 커요");
+  });
+
   it("returns 429 after exceeding the per-IP rate limit", async () => {
     configure();
     vi.stubGlobal(

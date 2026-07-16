@@ -136,7 +136,8 @@ export async function GET(req: NextRequest) {
     }
 
     const ct = (upstream.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-    if (!ct.startsWith("image/") && !ALLOWED_CONTENT_TYPES.has(ct)) {
+    // image/svg+xml은 스크립트를 포함할 수 있어 동일 출처로 서빙하면 XSS 위험 — 다른 image/*는 허용
+    if (ct === "image/svg+xml" || (!ct.startsWith("image/") && !ALLOWED_CONTENT_TYPES.has(ct))) {
       return NextResponse.json({ error: "unsupported content type" }, { status: 415 });
     }
 

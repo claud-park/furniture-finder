@@ -1,6 +1,10 @@
 const windows = new Map<string, { count: number; resetAt: number }>();
 
-/** x-forwarded-for의 첫 번째 항목(클라이언트 IP)을 반환. 없으면 "local". */
+/**
+ * x-forwarded-for의 첫 번째 항목(클라이언트 IP)을 반환. 없으면 "local".
+ * ⚠️ x-forwarded-for는 클라이언트가 임의로 조작 가능한 헤더라 신뢰할 수 없다 — per-IP 레이트리밋은
+ * 스푸핑으로 우회될 수 있으므로, 비용이 큰 라우트는 인스턴스 전체 한도(global backstop)를 함께 둔다.
+ */
 export function clientIp(req: { headers: { get(name: string): string | null } }): string {
   const xff = req.headers.get("x-forwarded-for");
   return xff?.split(",")[0]?.trim() || "local";
