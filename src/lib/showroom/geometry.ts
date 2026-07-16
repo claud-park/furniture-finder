@@ -25,6 +25,7 @@ export interface HouseGeometry {
 
 function wallSegment(edge: EdgeKey, isDoor: boolean): WallSegment {
   const { dir, x, z } = parseEdgeKey(edge);
+  // 2.4 - 2.0 은 IEEE754에서 0.3999…이 됨 — 반올림 없이는 상인방 높이가 0.4가 아니다
   const height = isDoor ? Math.round((WALL_HEIGHT_M - DOOR_HEIGHT_M) * 1e6) / 1e6 : WALL_HEIGHT_M;
   const centerY = isDoor ? DOOR_HEIGHT_M + height / 2 : height / 2;
   if (dir === "H") {
