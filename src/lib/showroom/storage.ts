@@ -38,6 +38,15 @@ export function deserializeShowroom(raw: string | null): ShowroomState | null {
   try {
     const env = JSON.parse(raw) as Envelope;
     if (env?.v !== 1 || !env.plan || !Array.isArray(env.items)) return null;
+    if (
+      typeof env.plan.cols !== "number" ||
+      typeof env.plan.rows !== "number" ||
+      !Array.isArray(env.plan.cells) ||
+      !Array.isArray(env.plan.walls) ||
+      !Array.isArray(env.plan.doors)
+    ) {
+      return null;
+    }
     const plan: FloorPlan = {
       cols: env.plan.cols,
       rows: env.plan.rows,

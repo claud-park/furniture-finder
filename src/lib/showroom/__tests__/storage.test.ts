@@ -46,6 +46,15 @@ describe("showroom storage", () => {
     expect(deserializeShowroom(JSON.stringify({ v: 999 }))).toBeNull();
   });
 
+  it("returns null for v:1 envelope with malformed plan payload", () => {
+    expect(deserializeShowroom(JSON.stringify({ v: 1, plan: {}, items: [] }))).toBeNull();
+    expect(
+      deserializeShowroom(
+        JSON.stringify({ v: 1, plan: { cols: 24, rows: 16, cells: "x", walls: [], doors: [] }, items: [] })
+      )
+    ).toBeNull();
+  });
+
   it("emptyPlan is 24x16 with empty sets", () => {
     const p = emptyPlan();
     expect(p.cols).toBe(24);
