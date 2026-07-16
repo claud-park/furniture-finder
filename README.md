@@ -6,6 +6,8 @@
 - Next.js (App Router) + TypeScript + Tailwind CSS
 - 모든 외부 검색은 서버 사이드 Route Handler에서 실행 (API 키 비노출, CORS 회피)
 - 소스별 rate limit(최소 1초 간격), 동일 쿼리 10분 메모리 캐시, exponential backoff 재시도(최대 2회)
+- **3D 쇼룸** (`/showroom`): 격자에 평면도를 그리고 3D 집으로 변환해 검색한 가구를
+  실제 치수로 배치해 보는 인터랙티브 페이지 — 아래 [3D 쇼룸](#3d-쇼룸) 참고
 
 ## 실행
 
@@ -14,6 +16,40 @@ npm install
 cp .env.example .env.local   # 필요한 키 입력 (없어도 IKEA 소스는 동작)
 npm run dev
 ```
+
+## 3D 쇼룸
+
+`/showroom` 에서 집을 그리고 가구를 3D로 배치할 수 있습니다.
+
+1. **평면도 그리기** — 24×16 격자(1칸 = 0.5m)를 클릭/드래그로 칠해 바닥을 만들고,
+   벽 도구로 칸 사이 경계를 클릭해 방을 나누고, 문 도구로 벽에 개구부를 냅니다.
+   외곽 벽은 바닥 윤곽에서 자동 생성됩니다.
+2. **DONE → 3D 보기** — react-three-fiber로 집을 렌더링합니다 (드래그 회전,
+   우클릭 팬, 스크롤 줌). 문 자리는 상인방만 남는 개구부가 됩니다.
+3. **가구 배치** — 두 가지 소스:
+   - *가구 검색 탭*: 기존 검색 어댑터 결과를 그대로 사용 (mm 치수 + 상품 사진).
+     치수가 불완전한 상품은 직접 입력 후 배치.
+   - *사진 가져오기 탭*: 사진 업로드 + 실제 치수(mm) 입력.
+   - 아이템은 실측 스케일의 사진 텍스처 박스로 렌더링되고, **바닥/벽 위에만**
+     배치됩니다(레이캐스트 대상이 바닥·벽 메시뿐이라 빈 공간 배치는 구조적으로 불가).
+   - 선택 후 이동 / R 회전 / Del 삭제, Esc 취소. 상태는 localStorage에 저장됩니다.
+4. **AI 3D 모델 (선택)** — `MESHY_API_KEY` 설정 시 아이템별 "3D 모델 생성" 버튼이
+   사진을 Meshy.ai image-to-3D로 보내 GLB 메시로 교체합니다 (치수에 맞게 스케일).
+   실패/미설정 시 텍스처 박스로 유지됩니다.
+
+```
+src/lib/showroom/     # 순수 코어 (격자·벽·방·지오메트리·배치 수학·직렬화) — 유닛 테스트 대상
+src/lib/model3d/      # Image3DProvider 어댑터 (Meshy.ai 구현, 교체 가능)
+src/components/showroom/  # FloorPlanEditor(2D), ShowroomScene(3D), FurniturePanel
+src/app/api/proxy/    # 이미지/GLB 동일 출처 중계 (SSRF 가드, content-type 화이트리스트, 50MB 캡)
+src/app/api/model3d/  # Meshy 프록시 (12MB 바디 캡, IP당 10회/시간 + 전역 30회/시간 rate limit)
+```
+
+> ⚠️ Meshy는 **호출당 과금되는 유료 API**이고 `/api/model3d` 는 인증이 없습니다.
+> 내장 rate limit은 인스턴스별 best-effort이므로, 공개 배포에 실제 키를 넣기 전에
+> 인프라 레벨 rate limit을 확인하세요.
+
+테스트: `npm test` — 쇼룸 순수 코어 + model3d 어댑터/라우트 유닛 테스트 (vitest).
 
 ## 데이터 소스와 API 키 발급
 
