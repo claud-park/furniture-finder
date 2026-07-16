@@ -1,6 +1,15 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Component,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Canvas, type ThreeEvent } from "@react-three/fiber";
 import { OrbitControls, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
@@ -133,7 +142,26 @@ function ItemMesh({
   );
 }
 
-/** 배치 아이템 렌더 선택: meshUrl 있으면 GLTF(Suspense), 없으면 텍스처 박스 */
+/** GLB 로드 실패(만료된 URL 등) 시 텍스처 박스로 영구 폴백. meshUrl이 바뀌면 재시도. */
+class MeshErrorBoundary extends Component<
+  { fallback: ReactNode; resetKey: string; children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidUpdate(prev: { resetKey: string }) {
+    if (prev.resetKey !== this.props.resetKey && this.state.failed) {
+      this.setState({ failed: false }); // 새 meshUrl이면 재시도
+    }
+  }
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
+/** 배치 아이템 렌더 선택: meshUrl 있으면 GLTF(Suspense+ErrorBoundary), 없으면 텍스처 박스 */
 function PlacedItemView(props: {
   item: PlacedItem;
   selected: boolean;
@@ -141,9 +169,11 @@ function PlacedItemView(props: {
 }) {
   if (!props.item.meshUrl) return <ItemBox {...props} item={props.item} />;
   return (
-    <Suspense fallback={<ItemBox {...props} item={props.item} />}>
-      <ItemMesh {...props} />
-    </Suspense>
+    <MeshErrorBoundary resetKey={props.item.meshUrl} fallback={<ItemBox {...props} item={props.item} />}>
+      <Suspense fallback={<ItemBox {...props} item={props.item} />}>
+        <ItemMesh {...props} />
+      </Suspense>
+    </MeshErrorBoundary>
   );
 }
 
