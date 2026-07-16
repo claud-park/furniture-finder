@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import FloorPlanEditor from "@/components/showroom/FloorPlanEditor";
 import type { FloorPlan, PlacedItem } from "@/lib/showroom/types";
 import {
@@ -10,6 +11,11 @@ import {
   serializeShowroom,
   deserializeShowroom,
 } from "@/lib/showroom/storage";
+
+const ShowroomScene = dynamic(() => import("@/components/showroom/ShowroomScene"), {
+  ssr: false,
+  loading: () => <p className="py-16 text-center text-sm text-foreground/50">3D 로딩 중…</p>,
+});
 
 export default function ShowroomPage() {
   const [mode, setMode] = useState<"edit" | "furnish">("edit");
@@ -64,8 +70,7 @@ export default function ShowroomPage() {
               ← 평면도 수정
             </button>
           </div>
-          {/* Task 9에서 ShowroomScene으로 교체 */}
-          <p className="py-16 text-center text-sm text-foreground/50">3D 뷰 준비 중…</p>
+          <ShowroomScene plan={plan} items={items} />
         </div>
       )}
     </main>
