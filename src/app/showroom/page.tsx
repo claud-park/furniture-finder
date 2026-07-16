@@ -23,6 +23,7 @@ export default function ShowroomPage() {
   const [plan, setPlan] = useState<FloorPlan>(emptyPlan);
   const [items, setItems] = useState<PlacedItem[]>([]);
   const [pending, setPending] = useState<PendingItem | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const loaded = useRef(false);
 
   // 최초 로드: localStorage 복원
@@ -74,7 +75,20 @@ export default function ShowroomPage() {
           </div>
           <div className="flex flex-col gap-4 lg:flex-row">
             <div className="min-w-0 flex-1">
-              <ShowroomScene plan={plan} items={items} />
+              <ShowroomScene
+                plan={plan}
+                items={items}
+                pending={pending}
+                onPlace={(item) => setItems((prev) => [...prev, item])}
+                onCancelPending={() => setPending(null)}
+                onUpdate={(item) => setItems((prev) => prev.map((i) => (i.id === item.id ? item : i)))}
+                onRemove={(id) => {
+                  setItems((prev) => prev.filter((i) => i.id !== id));
+                  setSelectedId(null);
+                }}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+              />
             </div>
             <FurniturePanel onSelect={setPending} />
           </div>
