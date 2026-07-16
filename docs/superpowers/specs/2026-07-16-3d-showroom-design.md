@@ -52,7 +52,7 @@ AGENTS.md (this Next.js version has breaking changes).
 
 ## Data model
 
-- **`FloorPlan`**: `{ cols, rows, cellSizeMm: 500, cells: Set<CellKey>, walls: Set<EdgeKey>, doors: Map<EdgeKey, DoorInfo> }`.
+- **`FloorPlan`**: `{ cols, rows, cellSizeMm: 500, cells: Set<CellKey>, walls: Set<EdgeKey>, doors: Set<EdgeKey> }` (v1 단순화: 문 메타데이터가 없어 `Map<EdgeKey, DoorInfo>` 대신 `Set<EdgeKey>` 사용).
   Edges are addressed on cell boundaries and normalized so each physical edge
   has exactly one key. Exterior walls are **derived** (outline of `cells`),
   never stored; `walls` holds interior walls only. A door references an edge
