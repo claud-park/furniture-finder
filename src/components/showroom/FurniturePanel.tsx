@@ -68,6 +68,7 @@ export default function FurniturePanel({ onSelect }: Props) {
   const [results, setResults] = useState<FurnitureItem[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [hasSearched, setHasSearched] = useState(false);
   /** 치수 미비 아이템 선택 시 보정 입력 */
   const [fixing, setFixing] = useState<{ item: FurnitureItem; dims: { w: string; d: string; h: string } } | null>(null);
 
@@ -78,30 +79,51 @@ export default function FurniturePanel({ onSelect }: Props) {
   const [uploadMount, setUploadMount] = useState<"floor" | "wall">("floor");
 
   useEffect(() => {
+    let cancelled = false;
     fetch("/api/sources")
       .then((r) => r.json())
-      .then((d: { sources: SourceInfo[] }) => setSources(d.sources))
-      .catch(() => setSources([]));
+      .then((d: { sources: SourceInfo[] }) => {
+        if (!cancelled) setSources(d.sources);
+      })
+      .catch(() => {
+        if (!cancelled) setSources([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const search = async () => {
     setSearching(true);
     setSearchError(null);
     setResults([]);
+    setFixing(null);
+    setHasSearched(true);
     const configured = sources.filter((s) => s.configured);
     if (configured.length === 0) {
       setSearchError("설정된 검색 소스가 없어요.");
       setSearching(false);
       return;
     }
+    const failures: string[] = [];
     const all = await Promise.allSettled(
       configured.map(async (s) => {
-        const res = await fetch(`/api/search?source=${s.id}&category=${category}&tol=0`);
-        const data: SearchResponse = await res.json();
-        return [...data.items, ...data.unverified];
+        try {
+          const res = await fetch(`/api/search?source=${s.id}&category=${category}&tol=0`);
+          const data: SearchResponse = await res.json();
+          if (data.status === "error") {
+            failures.push(`${s.name}: ${data.error ?? "검색 중 오류가 발생했어요"}`);
+            return [];
+          }
+          return [...data.items, ...data.unverified];
+        } catch {
+          failures.push(`${s.name}: 검색 중 오류가 발생했어요`);
+          return [];
+        }
       }),
     );
     setResults(all.flatMap((r) => (r.status === "fulfilled" ? r.value : [])));
+    if (failures.length > 0) setSearchError(failures.join(", "));
     setSearching(false);
   };
 
@@ -233,7 +255,9 @@ export default function FurniturePanel({ onSelect }: Props) {
             ))}
             {!searching && results.length === 0 && (
               <li className="py-6 text-center text-xs text-foreground/50">
-                카테고리를 고르고 검색해 보세요.
+                {hasSearched
+                  ? "조건에 맞는 가구를 찾지 못했어요."
+                  : "카테고리를 고르고 검색해 보세요."}
               </li>
             )}
           </ul>
