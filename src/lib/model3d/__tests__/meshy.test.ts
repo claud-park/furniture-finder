@@ -58,4 +58,22 @@ describe("MeshyProvider", () => {
     const p = new MeshyProvider("key", fetchFn);
     await expect(p.createTask("data:x")).rejects.toThrow(/402/);
   });
+
+  it("getTask throws on non-2xx", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response("nope", { status: 500 }));
+    const p = new MeshyProvider("key", fetchFn);
+    await expect(p.getTask("t1")).rejects.toThrow(/500/);
+  });
+
+  it("getTask rejects on malformed JSON body", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response("not json", { status: 200 }));
+    const p = new MeshyProvider("key", fetchFn);
+    await expect(p.getTask("t1")).rejects.toThrow();
+  });
+
+  it("createTask rejects on malformed JSON body", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response("not json", { status: 200 }));
+    const p = new MeshyProvider("key", fetchFn);
+    await expect(p.createTask("data:x")).rejects.toThrow();
+  });
 });
