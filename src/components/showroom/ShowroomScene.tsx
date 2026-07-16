@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { Canvas, type ThreeEvent } from "@react-three/fiber";
 import { OrbitControls, useGLTF } from "@react-three/drei";
@@ -188,18 +189,27 @@ async function toDataUrl(imageUrl: string): Promise<string> {
   return canvas.toDataURL("image/jpeg", 0.85);
 }
 
-/** 사진 → 3D 생성 폴링 훅 */
-function useMeshUpgrade(onUpdate: (item: PlacedItem) => void) {
+/**
+ * 사진 → 3D 생성 폴링 훅.
+ * - `itemsRef`: 항상 최신 배치 아이템 목록을 가리키는 ref. 폴링 도중 아이템이 삭제되면
+ *   체인을 조용히 중단해 삭제된 id로 onUpdate가 호출되는 것(부활 위험)을 막는다.
+ * - 한 번에 하나의 업그레이드만 진행: 새 `start` 호출 시 진행 중이던 체인은 취소한다.
+ */
+function useMeshUpgrade(onUpdate: (item: PlacedItem) => void, itemsRef: RefObject<PlacedItem[]>) {
   const [state, setState] = useState<{ itemId: string; message: string } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const cancel = useCallback(() => {
     if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
     setState(null);
   }, []);
 
+  const exists = useCallback((id: string) => itemsRef.current.some((i) => i.id === id), [itemsRef]);
+
   const start = useCallback(
     async (item: PlacedItem) => {
+      cancel(); // 동시 업그레이드 방지: 진행 중인 체인이 있으면 취소 후 새로 시작
       setState({ itemId: item.id, message: "3D 모델 생성 요청 중…" });
       try {
         const res = await fetch("/api/model3d", {
@@ -212,9 +222,17 @@ function useMeshUpgrade(onUpdate: (item: PlacedItem) => void) {
 
         const startedAt = Date.now();
         const poll = async () => {
+          if (!exists(item.id)) {
+            setState(null); // 폴링 중 아이템 삭제됨 → 조용히 중단
+            return;
+          }
           if (Date.now() - startedAt > 5 * 60 * 1000) throw new Error("시간 초과");
           const r = await fetch(`/api/model3d?taskId=${encodeURIComponent(data.taskId!)}`);
           const task = (await r.json()) as { status: string; modelUrl?: string; error?: string };
+          if (!exists(item.id)) {
+            setState(null); // 응답 대기 중 삭제됨 → onUpdate로 부활시키지 않음
+            return;
+          }
           if (task.status === "succeeded" && task.modelUrl) {
             onUpdate({ ...item, meshUrl: task.modelUrl });
             setState(null);
@@ -241,7 +259,7 @@ function useMeshUpgrade(onUpdate: (item: PlacedItem) => void) {
         timer.current = setTimeout(() => setState(null), 4000);
       }
     },
-    [onUpdate],
+    [onUpdate, cancel, exists],
   );
 
   useEffect(() => () => cancel(), [cancel]);
@@ -261,7 +279,12 @@ export default function ShowroomScene({
 }: ShowroomSceneProps) {
   const geo = useMemo(() => buildHouseGeometry(plan), [plan]);
   const target: [number, number, number] = [geo.bounds.centerX, 0, geo.bounds.centerZ];
-  const { state: upgradeState, start: startUpgrade } = useMeshUpgrade(onUpdate);
+  /** 항상 최신 items를 가리키는 ref — 폴링 체인이 삭제된 아이템을 참조하지 않도록 함 */
+  const itemsRef = useRef(items);
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+  const { state: upgradeState, start: startUpgrade } = useMeshUpgrade(onUpdate, itemsRef);
 
   const [ghost, setGhost] = useState<Pose | null>(null);
   /** 배치된 아이템 드래그 이동 중이면 해당 아이템 */
@@ -418,7 +441,7 @@ export default function ShowroomScene({
             회전(R)
           </button>
           <button onClick={() => onRemove(selected.id)} className="underline">삭제(Del)</button>
-          {!selected.meshUrl && upgradeState?.itemId !== selected.id && (
+          {!selected.meshUrl && !upgradeState && (
             <button onClick={() => startUpgrade(selected)} className="underline">
               3D 모델 생성
             </button>
