@@ -1,4 +1,4 @@
-import type { CellKey, EdgeKey, FloorPlan } from "./types";
+import type { CellKey, FloorPlan } from "./types";
 import { SIDES, cellKey, parseCellKey, neighborOf, edgeOfCell } from "./edges";
 
 /**
