@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import SearchForm from "@/components/SearchForm";
 import FurnitureCard from "@/components/FurnitureCard";
 import type { FurnitureQuery, SearchResponse, SourceId } from "@/lib/types";
@@ -146,11 +147,19 @@ export default function Home() {
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold">가구 핏 파인더</h1>
-        <p className="text-sm text-foreground/60">
-          공간에 딱 맞는 가구를 치수로 찾아보세요.
-        </p>
+      <header className="flex items-start gap-3">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-bold">가구 핏 파인더</h1>
+          <p className="text-sm text-foreground/60">
+            공간에 딱 맞는 가구를 치수로 찾아보세요.
+          </p>
+        </div>
+        <Link
+          href="/showroom"
+          className="ml-auto rounded-full bg-black/[.04] px-3 py-1.5 text-sm text-foreground/70 dark:bg-white/[.06]"
+        >
+          3D 쇼룸 →
+        </Link>
       </header>
 
       <SearchForm isSearching={isSearching} onSearch={handleSearch} />
