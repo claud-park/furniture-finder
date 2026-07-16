@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { clientIp, rateLimit } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
 
 const MAX_BYTES = 50 * 1024 * 1024; // GLB 여유 포함 50MB
+const MAX_REDIRECTS = 5;
+const ALLOWED_CONTENT_TYPES = new Set(["model/gltf-binary", "model/gltf+json", "application/octet-stream"]);
 
 const IPV4_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 
@@ -67,28 +70,74 @@ function parseAllowedUrl(raw: string): URL | null {
   return parsed;
 }
 
+/**
+ * 리다이렉트를 직접 따라가며 매 홉마다 SSRF 검증을 먼저 수행한다.
+ * `redirect: "follow"`는 최종 URL 검증 전에 이미 요청을 보내버려 blind SSRF에 취약하므로 사용하지 않는다.
+ */
+async function fetchValidated(start: URL): Promise<Response | { error: NextResponse }> {
+  let current = start;
+  let redirects = 0;
+  for (;;) {
+    let res: Response;
+    try {
+      res = await fetch(current.toString(), {
+        redirect: "manual",
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch (err) {
+      if (err instanceof Error && err.name === "TimeoutError") {
+        return { error: NextResponse.json({ error: "upstream timeout" }, { status: 504 }) };
+      }
+      throw err;
+    }
+    if (res.status >= 300 && res.status < 400) {
+      redirects += 1;
+      if (redirects > MAX_REDIRECTS) {
+        return { error: NextResponse.json({ error: "forbidden redirect target" }, { status: 502 }) };
+      }
+      const location = res.headers.get("location");
+      if (!location) {
+        return { error: NextResponse.json({ error: "forbidden redirect target" }, { status: 502 }) };
+      }
+      let next: URL;
+      try {
+        next = new URL(location, current);
+      } catch {
+        return { error: NextResponse.json({ error: "forbidden redirect target" }, { status: 502 }) };
+      }
+      if (!/^https?:$/.test(next.protocol) || isForbiddenHost(next.hostname)) {
+        return { error: NextResponse.json({ error: "forbidden redirect target" }, { status: 502 }) };
+      }
+      current = next;
+      continue;
+    }
+    return res;
+  }
+}
+
 /** 외부 이미지/GLB를 동일 출처로 중계해 CORS/텍스처 오염을 피한다. */
 export async function GET(req: NextRequest) {
+  const ip = clientIp(req);
+  if (!rateLimit(`proxy:${ip}`, 300, 10 * 60 * 1000)) {
+    return NextResponse.json({ error: "요청이 너무 많아요. 잠시 후 다시 시도해 주세요." }, { status: 429 });
+  }
+
   const url = req.nextUrl.searchParams.get("url");
   const parsed = url ? parseAllowedUrl(url) : null;
   if (!parsed) {
     return NextResponse.json({ error: "invalid url" }, { status: 400 });
   }
   try {
-    const upstream = await fetch(parsed.toString(), { redirect: "follow" });
+    const result = await fetchValidated(parsed);
+    if ("error" in result) return result.error;
+    const upstream = result;
     if (!upstream.ok || !upstream.body) {
       return NextResponse.json({ error: `upstream ${upstream.status}` }, { status: 502 });
     }
 
-    // 리다이렉트가 금지된 호스트로 이어졌는지 최종 URL로 재검증
-    let finalUrl: URL;
-    try {
-      finalUrl = new URL(upstream.url);
-    } catch {
-      return NextResponse.json({ error: "forbidden redirect target" }, { status: 502 });
-    }
-    if (!/^https?:$/.test(finalUrl.protocol) || isForbiddenHost(finalUrl.hostname)) {
-      return NextResponse.json({ error: "forbidden redirect target" }, { status: 502 });
+    const ct = (upstream.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    if (!ct.startsWith("image/") && !ALLOWED_CONTENT_TYPES.has(ct)) {
+      return NextResponse.json({ error: "unsupported content type" }, { status: 415 });
     }
 
     const len = Number(upstream.headers.get("content-length") ?? 0);
@@ -111,11 +160,15 @@ export async function GET(req: NextRequest) {
 
     return new NextResponse(upstream.body.pipeThrough(limiter), {
       headers: {
-        "Content-Type": upstream.headers.get("content-type") ?? "application/octet-stream",
+        "Content-Type": ct,
+        "X-Content-Type-Options": "nosniff",
         "Cache-Control": "public, max-age=86400",
       },
     });
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.name === "TimeoutError") {
+      return NextResponse.json({ error: "upstream timeout" }, { status: 504 });
+    }
     return NextResponse.json({ error: "fetch failed" }, { status: 502 });
   }
 }

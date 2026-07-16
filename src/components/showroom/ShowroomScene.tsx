@@ -120,18 +120,23 @@ function ItemMesh({
 }) {
   const { scene } = useGLTF(proxied(item.meshUrl!));
   const cloned = useMemo(() => scene.clone(true), [scene]);
-  const scale = useMemo(() => {
+  const { scale, center } = useMemo(() => {
     const box = new THREE.Box3().setFromObject(cloned);
     const size = new THREE.Vector3();
     box.getSize(size);
-    return fitScale([size.x, size.y, size.z], item);
+    const c = new THREE.Vector3();
+    box.getCenter(c);
+    return { scale: fitScale([size.x, size.y, size.z], item), center: c };
   }, [cloned, item]);
 
   return (
     <group position={item.position} rotation={[0, item.rotationY, 0]} onClick={onSelectClick}>
-      {/* 바닥 아이템: GLB 원점이 제각각이라 바운딩박스 기준으로 바닥에 맞춤 */}
+      {/* GLB 원점이 제각각이라 바운딩박스 중심을 아이템 원점에 맞추고(re-center), 스케일은 실제 치수(mm)에 맞춘다 */}
       <group scale={scale}>
-        <primitive object={cloned} />
+        <primitive
+          object={cloned}
+          position={[-center.x, -center.y, -center.z]}
+        />
       </group>
       {selected && (
         <mesh>
@@ -193,6 +198,8 @@ async function toDataUrl(imageUrl: string): Promise<string> {
  * 사진 → 3D 생성 폴링 훅.
  * - `itemsRef`: 항상 최신 배치 아이템 목록을 가리키는 ref. 폴링 도중 아이템이 삭제되면
  *   체인을 조용히 중단해 삭제된 id로 onUpdate가 호출되는 것(부활 위험)을 막는다.
+ *   같은 ref로 `getItem`을 노출해, 성공 시점에도 폴링 시작 시점이 아닌 현재 item(이동/회전 반영)에
+ *   meshUrl을 덮어써 stale writeback을 막는다.
  * - 한 번에 하나의 업그레이드만 진행: 새 `start` 호출 시 진행 중이던 체인은 취소한다.
  */
 function useMeshUpgrade(onUpdate: (item: PlacedItem) => void, itemsRef: RefObject<PlacedItem[]>) {
@@ -205,7 +212,11 @@ function useMeshUpgrade(onUpdate: (item: PlacedItem) => void, itemsRef: RefObjec
     setState(null);
   }, []);
 
-  const exists = useCallback((id: string) => itemsRef.current.some((i) => i.id === id), [itemsRef]);
+  const getItem = useCallback(
+    (id: string) => itemsRef.current.find((i) => i.id === id),
+    [itemsRef],
+  );
+  const exists = useCallback((id: string) => getItem(id) !== undefined, [getItem]);
 
   const start = useCallback(
     async (item: PlacedItem) => {
@@ -234,7 +245,9 @@ function useMeshUpgrade(onUpdate: (item: PlacedItem) => void, itemsRef: RefObjec
             return;
           }
           if (task.status === "succeeded" && task.modelUrl) {
-            onUpdate({ ...item, meshUrl: task.modelUrl });
+            // 폴링 도중 이동/회전됐을 수 있으니 시작 시점 item이 아닌 현재 item에 덮어쓴다
+            const current = getItem(item.id);
+            if (current) onUpdate({ ...current, meshUrl: task.modelUrl });
             setState(null);
           } else if (task.status === "failed") {
             throw new Error(task.error ?? "생성 실패");
@@ -259,7 +272,7 @@ function useMeshUpgrade(onUpdate: (item: PlacedItem) => void, itemsRef: RefObjec
         timer.current = setTimeout(() => setState(null), 4000);
       }
     },
-    [onUpdate, cancel, exists],
+    [onUpdate, cancel, exists, getItem],
   );
 
   useEffect(() => () => cancel(), [cancel]);
@@ -405,6 +418,8 @@ export default function ShowroomScene({
               item={item}
               selected={item.id === selectedId}
               onSelectClick={(e) => {
+                // 배치/이동 중에는 전파를 막지 않아 클릭이 뒤쪽 바닥/벽까지 도달하게 한다
+                if (active) return;
                 e.stopPropagation();
                 onSelect(item.id);
               }}

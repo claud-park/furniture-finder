@@ -26,6 +26,7 @@ export interface FloorPlan {
   /** 내부 벽만 저장 — 외곽 벽은 cells 윤곽에서 파생 */
   walls: Set<EdgeKey>;
   /** 문이 달린 edge (내부 벽 또는 외곽 edge여야 함) */
+  /** 스펙의 Map<EdgeKey, DoorInfo>를 단순화 — v1은 문 메타데이터가 없어 Set으로 충분 */
   doors: Set<EdgeKey>;
 }
 

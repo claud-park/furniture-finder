@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import FloorPlanEditor from "@/components/showroom/FloorPlanEditor";
@@ -24,7 +24,7 @@ export default function ShowroomPage() {
   const [items, setItems] = useState<PlacedItem[]>([]);
   const [pending, setPending] = useState<PendingItem | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const loaded = useRef(false);
+  const [hydrated, setHydrated] = useState(false);
 
   // 최초 로드: localStorage 복원
   useEffect(() => {
@@ -34,17 +34,18 @@ export default function ShowroomPage() {
       setPlan(saved.plan);
       setItems(saved.items);
     }
-    loaded.current = true;
+    setHydrated(true);
   }, []);
 
-  // 변경 시 저장 (복원 전에는 저장 금지)
+  // 변경 시 저장 (복원 전에는 저장 금지 — 빈 초기 상태가 저장돼 데이터가 유실되는 것을 막음)
   useEffect(() => {
-    if (!loaded.current) return;
+    if (!hydrated) return;
     try {
       localStorage.setItem(STORAGE_KEY, serializeShowroom({ plan, items }));
     } catch {
       // 용량 초과 등 — 저장 실패는 치명적이지 않음
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hydrated는 의도적으로 제외(가드 유지 목적)
   }, [plan, items]);
 
   return (
