@@ -41,30 +41,34 @@ function ItemBox({
   item,
   ghost = false,
   selected = false,
-  onPointerDown,
+  onSelectClick,
 }: {
   item: Pick<PlacedItem, "widthMm" | "depthMm" | "heightMm" | "imageUrl"> & Partial<Pose>;
   ghost?: boolean;
   selected?: boolean;
-  onPointerDown?: (e: ThreeEvent<PointerEvent>) => void;
+  onSelectClick?: (e: ThreeEvent<MouseEvent>) => void;
 }) {
   const [texture, setTexture] = useState<THREE.Texture | null>(null);
 
   useEffect(() => {
     if (!item.imageUrl) return;
     let disposed = false;
+    let loaded: THREE.Texture | null = null;
     new THREE.TextureLoader().load(
       proxied(item.imageUrl),
       (t) => {
         t.colorSpace = THREE.SRGBColorSpace;
-        if (!disposed) setTexture(t);
-        else t.dispose();
+        if (!disposed) {
+          loaded = t;
+          setTexture(t);
+        } else t.dispose();
       },
       undefined,
       () => {}, // 실패 → 단색 유지
     );
     return () => {
       disposed = true;
+      loaded?.dispose();
     };
   }, [item.imageUrl]);
 
@@ -78,7 +82,7 @@ function ItemBox({
     <mesh
       position={item.position ?? [0, 0, 0]}
       rotation={[0, item.rotationY ?? 0, 0]}
-      onPointerDown={onPointerDown}
+      onClick={onSelectClick}
       castShadow
     >
       <boxGeometry args={size} />
@@ -131,6 +135,7 @@ export default function ShowroomScene({
         onCancelPending();
         setDraggingId(null);
         onSelect(null);
+        setGhost(null);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -154,6 +159,13 @@ export default function ShowroomScene({
     if (!active) return;
     e.stopPropagation();
     setGhost(poseFromHit(e, kind));
+  };
+
+  /** 커서가 바닥/벽을 벗어나면 고스트를 지운다 (빈 공간 위에서는 프리뷰가 남지 않도록) */
+  const handleOut = (e: ThreeEvent<PointerEvent>) => {
+    if (!active) return;
+    e.stopPropagation();
+    setGhost(null);
   };
 
   const handleClick = (kind: "floor" | "wall") => (e: ThreeEvent<PointerEvent>) => {
@@ -187,6 +199,7 @@ export default function ShowroomScene({
             position={[f.center[0], -0.025, f.center[2]]}
             receiveShadow
             onPointerMove={handleMove("floor")}
+            onPointerOut={handleOut}
             onClick={handleClick("floor")}
           >
             <boxGeometry args={[CELL_SIZE_M, 0.05, CELL_SIZE_M]} />
@@ -202,6 +215,7 @@ export default function ShowroomScene({
             castShadow
             receiveShadow
             onPointerMove={w.kind === "wall" ? handleMove("wall") : undefined}
+            onPointerOut={w.kind === "wall" ? handleOut : undefined}
             onClick={w.kind === "wall" ? handleClick("wall") : undefined}
           >
             <boxGeometry args={w.size} />
@@ -216,7 +230,7 @@ export default function ShowroomScene({
               key={item.id}
               item={item}
               selected={item.id === selectedId}
-              onPointerDown={(e) => {
+              onSelectClick={(e) => {
                 e.stopPropagation();
                 onSelect(item.id);
               }}
