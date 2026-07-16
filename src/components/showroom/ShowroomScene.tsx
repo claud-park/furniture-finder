@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, type ThreeEvent } from "@react-three/fiber";
-import { OrbitControls } from "@react-three/drei";
+import { OrbitControls, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import type { FloorPlan, PendingItem, PlacedItem } from "@/lib/showroom/types";
 import { CELL_SIZE_M } from "@/lib/showroom/types";
 import { buildHouseGeometry } from "@/lib/showroom/geometry";
-import { floorPosition, wallPlacement } from "@/lib/showroom/placement";
+import { floorPosition, wallPlacement, fitScale } from "@/lib/showroom/placement";
 
 /** 외부 URL을 동일 출처 프록시로 감싼다 (data URL은 그대로) */
 export function proxied(url: string): string {
@@ -98,6 +98,126 @@ function ItemBox({
   );
 }
 
+/** GLB 아이템: 바운딩박스를 실제 치수로 스케일. 로드 실패는 ErrorBoundary 대신 상위 Suspense+fallback 처리 */
+function ItemMesh({
+  item,
+  selected,
+  onSelectClick,
+}: {
+  item: PlacedItem;
+  selected: boolean;
+  onSelectClick?: (e: ThreeEvent<MouseEvent>) => void;
+}) {
+  const { scene } = useGLTF(proxied(item.meshUrl!));
+  const cloned = useMemo(() => scene.clone(true), [scene]);
+  const scale = useMemo(() => {
+    const box = new THREE.Box3().setFromObject(cloned);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    return fitScale([size.x, size.y, size.z], item);
+  }, [cloned, item]);
+
+  return (
+    <group position={item.position} rotation={[0, item.rotationY, 0]} onClick={onSelectClick}>
+      {/* 바닥 아이템: GLB 원점이 제각각이라 바운딩박스 기준으로 바닥에 맞춤 */}
+      <group scale={scale}>
+        <primitive object={cloned} />
+      </group>
+      {selected && (
+        <mesh>
+          <boxGeometry args={[item.widthMm / 1000, item.heightMm / 1000, item.depthMm / 1000]} />
+          <meshBasicMaterial color="#2563eb" wireframe />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
+/** 배치 아이템 렌더 선택: meshUrl 있으면 GLTF(Suspense), 없으면 텍스처 박스 */
+function PlacedItemView(props: {
+  item: PlacedItem;
+  selected: boolean;
+  onSelectClick?: (e: ThreeEvent<MouseEvent>) => void;
+}) {
+  if (!props.item.meshUrl) return <ItemBox {...props} item={props.item} />;
+  return (
+    <Suspense fallback={<ItemBox {...props} item={props.item} />}>
+      <ItemMesh {...props} />
+    </Suspense>
+  );
+}
+
+async function toDataUrl(imageUrl: string): Promise<string> {
+  if (imageUrl.startsWith("data:")) return imageUrl;
+  const blob = await (await fetch(proxied(imageUrl))).blob();
+  const bitmap = await createImageBitmap(blob);
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
+
+/** 사진 → 3D 생성 폴링 훅 */
+function useMeshUpgrade(onUpdate: (item: PlacedItem) => void) {
+  const [state, setState] = useState<{ itemId: string; message: string } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancel = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+    setState(null);
+  }, []);
+
+  const start = useCallback(
+    async (item: PlacedItem) => {
+      setState({ itemId: item.id, message: "3D 모델 생성 요청 중…" });
+      try {
+        const res = await fetch("/api/model3d", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageDataUrl: await toDataUrl(item.imageUrl) }),
+        });
+        const data = (await res.json()) as { taskId?: string; error?: string };
+        if (!res.ok || !data.taskId) throw new Error(data.error ?? "요청 실패");
+
+        const startedAt = Date.now();
+        const poll = async () => {
+          if (Date.now() - startedAt > 5 * 60 * 1000) throw new Error("시간 초과");
+          const r = await fetch(`/api/model3d?taskId=${encodeURIComponent(data.taskId!)}`);
+          const task = (await r.json()) as { status: string; modelUrl?: string; error?: string };
+          if (task.status === "succeeded" && task.modelUrl) {
+            onUpdate({ ...item, meshUrl: task.modelUrl });
+            setState(null);
+          } else if (task.status === "failed") {
+            throw new Error(task.error ?? "생성 실패");
+          } else {
+            setState({ itemId: item.id, message: "3D 모델 생성 중… (최대 몇 분 걸려요)" });
+            timer.current = setTimeout(() => poll().catch(fail), 5000);
+          }
+        };
+        const fail = (err: unknown) => {
+          setState({
+            itemId: item.id,
+            message: `실패: ${err instanceof Error ? err.message : "알 수 없는 오류"} — 박스로 유지해요`,
+          });
+          timer.current = setTimeout(() => setState(null), 4000);
+        };
+        poll().catch(fail);
+      } catch (err) {
+        setState({
+          itemId: item.id,
+          message: `실패: ${err instanceof Error ? err.message : "알 수 없는 오류"} — 박스로 유지해요`,
+        });
+        timer.current = setTimeout(() => setState(null), 4000);
+      }
+    },
+    [onUpdate],
+  );
+
+  useEffect(() => () => cancel(), [cancel]);
+  return { state, start };
+}
+
 export default function ShowroomScene({
   plan,
   items,
@@ -111,6 +231,7 @@ export default function ShowroomScene({
 }: ShowroomSceneProps) {
   const geo = useMemo(() => buildHouseGeometry(plan), [plan]);
   const target: [number, number, number] = [geo.bounds.centerX, 0, geo.bounds.centerZ];
+  const { state: upgradeState, start: startUpgrade } = useMeshUpgrade(onUpdate);
 
   const [ghost, setGhost] = useState<Pose | null>(null);
   /** 배치된 아이템 드래그 이동 중이면 해당 아이템 */
@@ -226,7 +347,7 @@ export default function ShowroomScene({
         {/* 배치된 아이템 */}
         {items.map((item) =>
           item.id === draggingId ? null : (
-            <ItemBox
+            <PlacedItemView
               key={item.id}
               item={item}
               selected={item.id === selectedId}
@@ -267,7 +388,17 @@ export default function ShowroomScene({
             회전(R)
           </button>
           <button onClick={() => onRemove(selected.id)} className="underline">삭제(Del)</button>
+          {!selected.meshUrl && upgradeState?.itemId !== selected.id && (
+            <button onClick={() => startUpgrade(selected)} className="underline">
+              3D 모델 생성
+            </button>
+          )}
         </div>
+      )}
+      {upgradeState && (
+        <p className="absolute bottom-3 left-3 rounded-md bg-black/70 px-3 py-1.5 text-xs text-white">
+          {upgradeState.message}
+        </p>
       )}
     </div>
   );
