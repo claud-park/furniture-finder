@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import FloorPlanEditor from "@/components/showroom/FloorPlanEditor";
-import type { FloorPlan, PlacedItem } from "@/lib/showroom/types";
+import FurniturePanel from "@/components/showroom/FurniturePanel";
+import type { FloorPlan, PendingItem, PlacedItem } from "@/lib/showroom/types";
 import {
   STORAGE_KEY,
   emptyPlan,
@@ -21,6 +22,7 @@ export default function ShowroomPage() {
   const [mode, setMode] = useState<"edit" | "furnish">("edit");
   const [plan, setPlan] = useState<FloorPlan>(emptyPlan);
   const [items, setItems] = useState<PlacedItem[]>([]);
+  const [pending, setPending] = useState<PendingItem | null>(null);
   const loaded = useRef(false);
 
   // 최초 로드: localStorage 복원
@@ -70,7 +72,12 @@ export default function ShowroomPage() {
               ← 평면도 수정
             </button>
           </div>
-          <ShowroomScene plan={plan} items={items} />
+          <div className="flex flex-col gap-4 lg:flex-row">
+            <div className="min-w-0 flex-1">
+              <ShowroomScene plan={plan} items={items} />
+            </div>
+            <FurniturePanel onSelect={setPending} />
+          </div>
         </div>
       )}
     </main>
