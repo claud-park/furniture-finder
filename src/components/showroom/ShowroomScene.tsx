@@ -88,6 +88,13 @@ function ItemBox({
     item.depthMm / 1000,
   ];
 
+  const commonMaterialProps = {
+    transparent: ghost,
+    opacity: ghost ? 0.5 : 1,
+    emissive: selected ? "#2563eb" : "#000000",
+    emissiveIntensity: selected ? 0.25 : 0,
+  } as const;
+
   return (
     <mesh
       position={item.position ?? [0, 0, 0]}
@@ -96,14 +103,23 @@ function ItemBox({
       castShadow
     >
       <boxGeometry args={size} />
-      <meshStandardMaterial
-        map={texture ?? undefined}
-        color={texture ? "#ffffff" : "#8b9dc3"}
-        transparent={ghost}
-        opacity={ghost ? 0.5 : 1}
-        emissive={selected ? "#2563eb" : "#000000"}
-        emissiveIntensity={selected ? 0.25 : 0}
-      />
+      {/*
+        상품 사진은 정면/후면(±z, BoxGeometry 면 순서상 material-4/5)에만 입힌다.
+        재질을 하나만 넘기면 위/아래/옆면에도 같은 텍스처가 씌워지는데, 그 면들의 기본 UV는
+        "눕혀서" 매핑돼 카메라가 내려다보는 기본 시점에서 가구가 옆으로 누운 것처럼 보였다.
+      */}
+      {[0, 1, 2, 3].map((i) => (
+        <meshStandardMaterial key={i} attach={`material-${i}`} color="#8b9dc3" {...commonMaterialProps} />
+      ))}
+      {[4, 5].map((i) => (
+        <meshStandardMaterial
+          key={i}
+          attach={`material-${i}`}
+          map={texture ?? undefined}
+          color={texture ? "#ffffff" : "#8b9dc3"}
+          {...commonMaterialProps}
+        />
+      ))}
     </mesh>
   );
 }
